@@ -21,7 +21,7 @@ load_dotenv()
 # OpenRouter LLM Configuration (for AI Explanations)
 # =============================
 # OPTION 1: Add your API key here directly (NOT recommended for public GitHub)
-OPENROUTER_API_KEY = "sk-or-v1-your-key-here"  # 👈 Replace with your actual key from https://openrouter.ai/keys
+OPENROUTER_API_KEY = "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"  # 👈 Replace with your actual key from https://openrouter.ai/keys
 OPENROUTER_MODEL_NAME = "openai/gpt-oss-20b:free"  # Fast and smart model
 
 # Debug mode: Set to True to see raw AI responses
@@ -36,8 +36,8 @@ if os.getenv("OPENROUTER_MODEL"):
 
 # Initialize OpenAI client
 try:
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
         api_key=OPENROUTER_API_KEY,
     )
     MODEL = OPENROUTER_MODEL_NAME
@@ -941,29 +941,29 @@ def openrouter_explain_risk(band_text, pct, inputs, arabic=False):
     factors_text = ", ".join(risk_factors) if risk_factors else "Standard pregnancy parameters"
 
     user_prompt = f"""
-    Language: {language}
-    Risk Level: {band_text} ({pct}%)
+Language: {language}
+Risk Level: {band_text} ({pct}%)
 Key Risk Factors: {factors_text}
 
 Provide exactly 4 bullet points explaining the risk level based on these factors.
-    """
+"""
 
     try:
-    completion = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        completion = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             temperature=0.5,  # Increased for more varied responses
             max_tokens=400,   # Increased to ensure complete responses
-        extra_headers={
-            "HTTP-Referer": "https://yourappname.streamlit.app",
-            "X-Title": "Stillbirth Risk Assessment"
-        }
-    )
+            extra_headers={
+                "HTTP-Referer": "https://yourappname.streamlit.app",
+                "X-Title": "Stillbirth Risk Assessment"
+            }
+        )
 
-    text = completion.choices[0].message.content.strip()
+        text = completion.choices[0].message.content.strip()
         
         # Parse bullet points more reliably
         bullets = []
@@ -1483,12 +1483,12 @@ if submitted:
     # Try to use LLM for intelligent explanation, fallback to rule-based
     ai_used = False
     if client and OPENROUTER_API_KEY != "sk-or-v1-your-key-here":
-    try:
+        try:
             with st.spinner(L("🤖 AI analyzing risk factors...", "🤖 الذكاء الاصطناعي يحلل عوامل الخطر...")):
                 bullets = openrouter_explain_risk(band_text, pct, user_input, AR)
                 ai_used = True
             st.success(L("✅ AI-powered explanation generated", "✅ تم إنشاء توضيح بالذكاء الاصطناعي"), icon="🤖")
-    except Exception as e:
+        except Exception as e:
             # Use fallback explanation if LLM fails
             bullets = explanation_for_band(d, band_text, user_input)
             st.info(L(f"ℹ️ Using rule-based explanation (AI unavailable: {str(e)[:50]}...)", 
