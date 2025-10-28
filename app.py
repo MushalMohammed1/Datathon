@@ -36,16 +36,16 @@ if os.getenv("OPENROUTER_MODEL"):
 
 # Initialize OpenAI client
 
-try:
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY,
-    )
-    MODEL = OPENROUTER_MODEL_NAME
-except Exception as e:
-    client = None
-    MODEL = None
-    print(f"LLM client initialization failed: {e}")
+    try:
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+        )
+        MODEL = OPENROUTER_MODEL_NAME
+    except Exception as e:
+        client = None
+        MODEL = None
+        print(f"LLM client initialization failed: {e}")
 
 # =============================
 # XGBoost Model Loading & Prediction Functions
