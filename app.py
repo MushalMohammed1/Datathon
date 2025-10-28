@@ -35,6 +35,7 @@ if os.getenv("OPENROUTER_MODEL"):
     OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL")
 
 # Initialize OpenAI client
+
 try:
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
