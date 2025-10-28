@@ -8,20 +8,172 @@ import os
 import base64
 from datetime import datetime
 import pandas as pd
+import numpy as np
 import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
-import preprocessing  # Import our preprocessing module with XGBoost model
+import joblib
 
 # Load environment variables from .env file
 load_dotenv()
 
-# ---- OpenRouter LLM Setup ----
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
-MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
+# =============================
+# OpenRouter LLM Configuration (for AI Explanations)
+# =============================
+# OPTION 1: Add your API key here directly (NOT recommended for public GitHub)
+OPENROUTER_API_KEY = "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"  # 👈 Replace with your actual key from https://openrouter.ai/keys
+OPENROUTER_MODEL_NAME = "openai/gpt-oss-20b:free"  # Fast and smart model
+
+# Debug mode: Set to True to see raw AI responses
+DEBUG_AI = False  # Set to False in production
+
+# OPTION 2: Or keep using .env file (more secure)
+# If .env file exists, it will override the above
+if os.getenv("OPENROUTER_API_KEY"):
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if os.getenv("OPENROUTER_MODEL"):
+    OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL")
+
+# Initialize OpenAI client
+try:
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+    )
+    MODEL = OPENROUTER_MODEL_NAME
+except Exception as e:
+    client = None
+    MODEL = None
+    print(f"LLM client initialization failed: {e}")
+
+# =============================
+# XGBoost Model Loading & Prediction Functions
+# =============================
+
+@st.cache_resource
+def load_xgboost_model():
+    """Load the XGBoost model and feature names (cached for performance)"""
+    try:
+        # Load model
+        model_path = os.path.join(os.path.dirname(__file__), 'xgb_model.joblib')
+        model = joblib.load(model_path)
+        
+        # Load feature names
+        features_path = os.path.join(os.path.dirname(__file__), 'features_used.txt')
+        with open(features_path, 'r') as f:
+            feature_names = [line.strip() for line in f if line.strip() and line.strip() != 'feature']
+        
+        return model, feature_names
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        return None, None
+
+def preprocess_input_for_model(user_input):
+    """Convert user input to model features"""
+    features = {}
+    
+    # Feature 1: pregnancyduration
+    features['pregnancyduration'] = user_input.get('gestational_weeks', 39)
+    
+    # Feature 2: babyweight
+    features['babyweight'] = user_input.get('babyweight', 3.2)
+    
+    # Feature 3: visit_pregnancy_clinic
+    features['visit_pregnancy_clinic'] = user_input.get('prenatal_visits', 4)
+    
+    # Feature 4: total_emergency_visits
+    features['total_emergency_visits'] = user_input.get('total_emergency_visits', 0)
+    
+    # Feature 5: height
+    features['height'] = user_input.get('height', 165)
+    
+    # Feature 6: bmi
+    bmi = user_input.get('bmi', 27.0)
+    features['bmi'] = bmi
+    
+    # Feature 7: weight (calculated from BMI and height)
+    height_m = features['height'] / 100.0
+    features['weight'] = bmi * (height_m ** 2)
+    
+    # Feature 8: systolic
+    features['systolic'] = user_input.get('systolic_bp', 120)
+    
+    # Feature 9: diastolic
+    features['diastolic'] = user_input.get('diastolic_bp', 75)
+    
+    # Feature 10: has_diabetes
+    diabetes = user_input.get('diabetes', 'no')
+    features['has_diabetes'] = 1 if diabetes in ['yes', 'نعم'] else 0
+    
+    # Feature 11: has_hypertension
+    hypertension = user_input.get('hypertension', 'no')
+    features['has_hypertension'] = 1 if hypertension in ['yes', 'نعم'] else 0
+    
+    # Feature 12: Creatinine
+    features['Creatinine (Mass/volume) in Serum or Plasma_mean'] = user_input.get('creatinine_mean', 0.0)
+    
+    # Feature 13: HbA1c
+    features['Hemoglobin A1c/Hemoglobin. Total in Blood_mean'] = user_input.get('hba1c_mean', 0.0)
+    
+    # Feature 14: Potassium
+    features['Potassium (Moles/volume) in Serum or Plasma_mean'] = user_input.get('potassium_mean', 0.0)
+    
+    # Feature 15: ferric carboxymaltose_times
+    features['ferric carboxymaltose_times'] = user_input.get('ferric_carboxymaltose_times', 0)
+    
+    # Feature 16: metoprolol_times
+    features['metoprolol_times'] = user_input.get('metoprolol_times', 0)
+    
+    # Feature 17: total_inpatient_visits
+    features['total_inpatient_visits'] = user_input.get('total_inpatient_visits', 0)
+    
+    # Feature 18: twins
+    features['twins'] = user_input.get('twins', 0)
+    
+    # Feature 19: deliverytype
+    features['deliverytype'] = user_input.get('deliverytype', 1)
+    
+    # Feature 20: year (mother's age)
+    features['year'] = user_input.get('year', 28)
+    
+    return pd.DataFrame([features])
+
+def predict_stillbirth_risk(user_input):
+    """Make prediction using XGBoost model"""
+    model, feature_names = load_xgboost_model()
+    
+    if model is None or feature_names is None:
+        raise Exception("Model not loaded properly")
+    
+    # Preprocess input
+    features_df = preprocess_input_for_model(user_input)
+    
+    # Ensure features are in correct order
+    features_df = features_df[feature_names]
+    
+    # Make prediction (model predicts probability of being alive)
+    alive_probability = model.predict_proba(features_df)[0, 1]
+    death_probability = 1 - alive_probability
+    
+    # Convert to percentage
+    risk_percentage = int(round(death_probability * 100))
+    
+    # Classify risk level
+    if risk_percentage <= 33:
+        risk_level = 'Low'
+        risk_band = 'low'
+    elif risk_percentage <= 66:
+        risk_level = 'Moderate'
+        risk_band = 'mod'
+    else:
+        risk_level = 'High'
+        risk_band = 'high'
+    
+    return {
+        'risk_percentage': risk_percentage,
+        'risk_level': risk_level,
+        'risk_band': risk_band
+    }
 
 # ---- PDF deps ----
 from reportlab.lib.pagesizes import A4
@@ -757,35 +909,95 @@ def openrouter_explain_risk(band_text, pct, inputs, arabic=False):
     """
     language = "Arabic" if arabic else "English"
     system_prompt = (
-        "You are a clinical assistant explaining stillbirth risk levels "
-        "in 2–4 short, factual bullet points. "
-        "Avoid diagnosis or treatment; focus on explaining the contributing factors."
+        "You are a clinical assistant specializing in maternal and neonatal health. "
+        "You MUST provide exactly 4 bullet points explaining stillbirth risk factors. "
+        "Each bullet point must:\n"
+        "1. Start with a dash (-) or bullet (•)\n"
+        "2. Be 1-2 sentences maximum\n"
+        "3. Focus on one specific risk factor from the patient data\n"
+        "4. Be factual and clinical (no diagnosis or treatment advice)\n\n"
+        "Format example:\n"
+        "- High BMI increases cardiovascular stress during pregnancy\n"
+        "- Limited prenatal visits reduce early detection of complications\n"
+        "- Elevated blood pressure may indicate preeclampsia risk\n"
+        "- Advanced gestational age requires closer monitoring"
     )
+
+    # Create a more detailed user prompt with specific factors
+    risk_factors = []
+    if inputs.get("bmi", 0) >= 30:
+        risk_factors.append(f"BMI: {inputs['bmi']}")
+    if inputs.get("systolic_bp", 0) >= 140:
+        risk_factors.append(f"Systolic BP: {inputs['systolic_bp']}")
+    if inputs.get("prenatal_visits", 0) < 4:
+        risk_factors.append(f"Prenatal visits: {inputs['prenatal_visits']}")
+    if inputs.get("gestational_weeks", 0) < 37:
+        risk_factors.append(f"Gestational weeks: {inputs['gestational_weeks']}")
+    if inputs.get("diabetes") in ['yes', 'نعم']:
+        risk_factors.append("Diabetes: present")
+    if inputs.get("hypertension") in ['yes', 'نعم']:
+        risk_factors.append("Hypertension: present")
+    
+    factors_text = ", ".join(risk_factors) if risk_factors else "Standard pregnancy parameters"
 
     user_prompt = f"""
-    Language: {language}
-    Risk Level: {band_text} ({pct}%)
-    Inputs: {inputs}
-    """
+Language: {language}
+Risk Level: {band_text} ({pct}%)
+Key Risk Factors: {factors_text}
 
-    completion = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.2,
-        max_tokens=200,
-        extra_headers={
-            "HTTP-Referer": "https://yourappname.streamlit.app",
-            "X-Title": "Stillbirth Risk Assessment"
-        }
-    )
+Provide exactly 4 bullet points explaining the risk level based on these factors.
+"""
 
-    text = completion.choices[0].message.content.strip()
-    bullets = [line.strip("-• ") for line in text.split("\n") if line.strip()]
-    return bullets[:4] or [text]
+    try:
+        completion = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.5,  # Increased for more varied responses
+            max_tokens=400,   # Increased to ensure complete responses
+            extra_headers={
+                "HTTP-Referer": "https://yourappname.streamlit.app",
+                "X-Title": "Stillbirth Risk Assessment"
+            }
+        )
 
+        text = completion.choices[0].message.content.strip()
+        
+        # Parse bullet points more reliably
+        bullets = []
+        for line in text.split("\n"):
+            line = line.strip()
+            # Remove common bullet point markers
+            if line.startswith(("- ", "• ", "* ", "1.", "2.", "3.", "4.")):
+                line = line.lstrip("-•* 1234.")
+                line = line.strip()
+                if line:  # Only add non-empty lines
+                    bullets.append(line)
+        
+        # Ensure we have exactly 4 bullets
+        if len(bullets) < 4:
+            # If less than 4, pad with generic ones
+            while len(bullets) < 4:
+                bullets.append("Continue regular monitoring and follow medical advice.")
+        elif len(bullets) > 4:
+            # If more than 4, take first 4
+            bullets = bullets[:4]
+        
+        # Debug output
+        if DEBUG_AI:
+            st.write(f"**Debug: LLM Response ({len(bullets)} bullets)**")
+            for i, b in enumerate(bullets, 1):
+                st.write(f"{i}. {b}")
+        
+        return bullets
+
+    except Exception as e:
+        # Log the error for debugging
+        if DEBUG_AI:
+            st.error(f"LLM Error: {str(e)}")
+        raise  # Re-raise so the calling code can handle it
 def explanation_for_band(d, band_text, user_input=None):
     """Fallback explanation when LLM is unavailable"""
     base_map = {
@@ -1142,15 +1354,26 @@ with st.form("patient_info_form"):
     babyweight = c2.number_input(L("Baby weight (kg)", "وزن الطفل (كجم)"), 0.5, 6.0, 3.2, step=0.1)
     twins = c3.selectbox(L("Twins", "توأم"), [L("No", "لا"), L("Yes", "نعم")])
     twins_val = 1 if twins in [L("Yes", "نعم"), "Yes", "نعم"] else 0
-    deliverytype = c4.selectbox(L("Delivery type", "نوع الولادة"), [L("Vaginal", "طبيعية"), L("Cesarean", "قيصرية")])
-    deliverytype_val = 2 if deliverytype in [L("Cesarean", "قيصرية"), "Cesarean", "قيصرية"] else 1
+    
+    # Delivery type with 3 options
+    delivery_options_en = ["Vaginal", "Cesarean", "Assisted"]
+    delivery_options_ar = ["طبيعية", "قيصرية", "مساعدة"]
+    delivery_options = [L(en, ar) for en, ar in zip(delivery_options_en, delivery_options_ar)]
+    deliverytype = c4.selectbox(L("Delivery type", "نوع الولادة"), delivery_options)
+    # Map delivery type to numeric values: Vaginal=1, Cesarean=2, Assisted=3
+    if deliverytype in [L("Vaginal", "طبيعية"), "Vaginal", "طبيعية"]:
+        deliverytype_val = 1
+    elif deliverytype in [L("Cesarean", "قيصرية"), "Cesarean", "قيصرية"]:
+        deliverytype_val = 2
+    else:  # Assisted
+        deliverytype_val = 3
     
     # Maternal Physical Measurements
     st.markdown(f"**{L('Maternal Measurements', 'قياسات الأم')}**")
     c1, c2, c3 = st.columns(3)
     height = c1.number_input(L("Height (cm)", "الطول (سم)"), 130, 200, 165)
     bmi = c2.number_input("BMI", 16.0, 45.0, 27.0, step=0.1)
-    year = c3.number_input(L("Year", "السنة"), 2020, 2025, datetime.now().year)
+    maternal_age = c3.number_input(L("Mother's age (years)", "عمر الأم (بالسنوات)"), 15, 55, 28)
 
     # Vital Signs
     st.markdown(f"**{L('Vital Signs', 'العلامات الحيوية')}**")
@@ -1172,14 +1395,14 @@ with st.form("patient_info_form"):
     hypertension = c2.selectbox(L("Hypertension", "ارتفاع ضغط"), [L("no", "لا"), L("yes", "نعم")])
 
     # Laboratory Tests (Optional)
-    with st.expander(L("📊 Laboratory Test Results (Optional)", "📊 نتائج الفحوصات المخبرية (اختياري)"), expanded=False):
+    with st.expander(L("📊 Laboratory Test Results", "📊 نتائج الفحوصات المخبرية "), expanded=False):
         c1, c2, c3 = st.columns(3)
         creatinine_mean = c1.number_input(L("Creatinine (mg/dL)", "الكرياتينين"), 0.0, 5.0, 0.0, step=0.1, help=L("Leave 0 if not available", "اترك 0 إذا لم يكن متاحًا"))
         hba1c_mean = c2.number_input(L("HbA1c (%)", "الهيموغلوبين السكري"), 0.0, 15.0, 0.0, step=0.1, help=L("Leave 0 if not available", "اترك 0 إذا لم يكن متاحًا"))
         potassium_mean = c3.number_input(L("Potassium (mmol/L)", "البوتاسيوم"), 0.0, 10.0, 0.0, step=0.1, help=L("Leave 0 if not available", "اترك 0 إذا لم يكن متاحًا"))
 
     # Medications (Optional)
-    with st.expander(L("💊 Medications (Optional)", "💊 الأدوية (اختياري)"), expanded=False):
+    with st.expander(L("💊 Medications ", "💊 الأدوية "), expanded=False):
         c1, c2 = st.columns(2)
         ferric_times = c1.number_input(L("Ferric carboxymaltose (times)", "حقن الحديد (عدد المرات)"), 0, 20, 0, help=L("Number of times prescribed", "عدد مرات الوصف"))
         metoprolol_times = c2.number_input(L("Metoprolol (times)", "ميتوبرولول (عدد المرات)"), 0, 50, 0, help=L("Number of times prescribed", "عدد مرات الوصف"))
@@ -1228,12 +1451,12 @@ if submitted:
         "total_inpatient_visits": inpatient_visits,
         "twins": twins_val,
         "deliverytype": deliverytype_val,
-        "year": year
+        "year": maternal_age  # Using mother's age for the year feature
     }
     
     # Get prediction from XGBoost model
     try:
-        prediction = preprocessing.predict_risk(user_input)
+        prediction = predict_stillbirth_risk(user_input)
         pct = prediction['risk_percentage']
         band_text = L(prediction['risk_level'], 
                      "منخفض" if prediction['risk_level'] == "Low" else 
@@ -1258,14 +1481,26 @@ if submitted:
     }
     
     # Try to use LLM for intelligent explanation, fallback to rule-based
-    try:
-        bullets = openrouter_explain_risk(band_text, pct, user_input, AR)
-    except Exception as e:
-        # Use fallback explanation
+    ai_used = False
+    if client and OPENROUTER_API_KEY != "sk-or-v1-your-key-here":
+        try:
+            with st.spinner(L("🤖 AI analyzing risk factors...", "🤖 الذكاء الاصطناعي يحلل عوامل الخطر...")):
+                bullets = openrouter_explain_risk(band_text, pct, user_input, AR)
+                ai_used = True
+            st.success(L("✅ AI-powered explanation generated", "✅ تم إنشاء توضيح بالذكاء الاصطناعي"), icon="🤖")
+        except Exception as e:
+            # Use fallback explanation if LLM fails
+            bullets = explanation_for_band(d, band_text, user_input)
+            st.info(L(f"ℹ️ Using rule-based explanation (AI unavailable: {str(e)[:50]}...)", 
+                     f"ℹ️ استخدام توضيح قائم على القواعد (الذكاء الاصطناعي غير متاح)"))
+    else:
+        # No API key configured - use rule-based explanation
         bullets = explanation_for_band(d, band_text, user_input)
+        st.info(L("ℹ️ Using rule-based explanation (AI key not configured)", 
+                 "ℹ️ استخدام توضيح قائم على القواعد (مفتاح الذكاء الاصطناعي غير مُعد)"))
 
     st.markdown(f"### {L('Risk Assessment', 'تقييم الخطورة')}", unsafe_allow_html=True)
-    range_txt = L("Bands: Low 0–33 • Moderate 34–66 • High 67–100", "المستويات: منخفض ٠–٣٣ • متوسط ٣٤–٦٦ • مرتفع ٦٧–١٠٠")
+    range_txt = L("Bands: Low 0–40 • Moderate 41–69 • High 70–100", "المستويات: منخفض ٠–٤٠ • متوسط ٤١–٦٩ • مرتفع ٧٠–١٠٠")
     st.markdown(
         f'<div class="lab-wrap"><div class="lab-head"><div class="lab-name">{L("Risk Index", "مؤشر الخطورة")}</div>'
         f'<div class="lab-ref"><div style="text-align:right"><div style="font-size:1.25rem;font-weight:800">{pct}</div>'
@@ -1303,9 +1538,20 @@ if submitted:
         unsafe_allow_html=True
     )
     st.markdown("<hr class='soft'/>", unsafe_allow_html=True)
-    st.markdown(f"**{L('Explanation', 'توضيح')}**")
-    for line in bullets:
-        st.write(f"- {line}")
+    
+    # Display explanation header with AI indicator
+    if ai_used:
+        st.markdown(f"### {L('🤖 AI Clinical Analysis', '🤖 التحليل السريري بالذكاء الاصطناعي')}")
+        st.markdown(f"*{L('AI-generated personalized explanation based on patient data:', 'شرح مخصص بالذكاء الاصطناعي بناءً على بيانات المريضة:')}*")
+    else:
+        st.markdown(f"### {L('📋 Clinical Analysis', '📋 التحليل السريري')}")
+        st.markdown(f"*{L('Rule-based clinical explanation:', 'شرح سريري قائم على القواعد:')}*")
+    
+    # Display explanation bullets
+    for i, line in enumerate(bullets, 1):
+        st.markdown(f"**{i}.** {line}")
+    
+    st.markdown("<br/>", unsafe_allow_html=True)
 
     # Save to history
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
