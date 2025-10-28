@@ -1,0 +1,21 @@
+feature
+pregnancyduration
+babyweight
+visit_pregnancy_clinic
+total_emergency_visits
+height
+bmi
+weight
+systolic
+diastolic
+has_diabetes
+has_hypertension
+Creatinine (Mass/volume) in Serum or Plasma_mean
+Hemoglobin A1c/Hemoglobin. Total in Blood_mean
+Potassium (Moles/volume) in Serum or Plasma_mean
+ferric carboxymaltose_times
+metoprolol_times
+total_inpatient_visits
+twins
+deliverytype
+year
