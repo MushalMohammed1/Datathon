@@ -21,7 +21,7 @@ load_dotenv()
 # OpenRouter LLM Configuration (for AI Explanations)
 # =============================
 # OPTION 1: Add your API key here directly (NOT recommended for public GitHub)
-OPENROUTER_API_KEY = "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"  # 👈 Replace with your actual key from https://openrouter.ai/keys
+OPENROUTER_API_KEY = "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"  # 👈 Replace with your actual key from https://openrouter.ai/keys
 OPENROUTER_MODEL_NAME = "openai/gpt-oss-20b:free"  # Fast and smart model
 
 # Debug mode: Set to True to see raw AI responses
@@ -43,7 +43,7 @@ try:
         api_key=OPENROUTER_API_KEY,
     )
     MODEL = OPENROUTER_MODEL_NAME
-    except Exception as e:
+except Exception as e:
     client = None
     MODEL = None
     print(f"LLM client initialization failed: {e}")
